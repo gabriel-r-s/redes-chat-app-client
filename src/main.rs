@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::net::{SocketAddr, TcpStream};
 use std::str::FromStr as _;
+use std::sync::{Arc, Mutex};
 
 type AesKey = [u8; 16];
 
@@ -59,9 +60,9 @@ fn main() {
         .nth(1)
         .and_then(|addr| SocketAddr::from_str(&addr).ok())
         .unwrap_or(SocketAddr::from(([127, 0, 0, 1], 8888)));
-    let mut stream = BufReader::new(
+    let mut stream = Box::leak(Box::new(BufReader::new(
         TcpStream::connect(addr).unwrap_or_else(|_| panic!("Cannot connect to address {}", addr)),
-    );
+    )));
     println!("connecting to {addr}");
 
     let cipher = symm::Cipher::aes_128_cbc();
@@ -75,12 +76,12 @@ fn main() {
 
     {
         // thread de leitura do socket
-        let mut stream = BufReader::new(stream.get_ref().try_clone().unwrap());
         std::thread::spawn(move || loop {
             recv_buf.clear();
             stream
                 .read_line(&mut recv_buf)
                 .expect("Ended connection with server");
+            print!("got {recv_buf}");
             /*  let line = symm::decrypt(
              *      cipher,
              *      &aes_key,
@@ -104,6 +105,7 @@ fn main() {
              *      &symm::encrypt(cipher, &aes_key, None, send_buf.trim().as_bytes()).unwrap(),
              *  );
              */
+            println!("sending {:?}", send_buf);
             writeln!(stream.get_mut(), "{}", send_buf).expect("Ended connection with server");
         }
         send_buf.clear();
