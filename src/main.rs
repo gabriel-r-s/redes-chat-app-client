@@ -1,17 +1,22 @@
+use openssl::{base64, rsa, sha, symm};
+use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::net::{SocketAddr, TcpStream};
 use std::str::FromStr as _;
 
-fn auth_user(stream: &mut BufReader<TcpStream>, recv_buf: &mut String, send_buf: &mut String) {
+type AesKey = [u8; 16];
+
+fn auth_user(stream: &mut BufReader<TcpStream>, recv_buf: &mut String, aes_key: AesKey) {
     loop {
         print!("username: ");
         std::io::stdout().flush().unwrap();
 
-        send_buf.clear();
-        std::io::stdin().read_line(send_buf).unwrap();
-        let Some(name) = send_buf.split_whitespace().next() else {
+        recv_buf.clear();
+        std::io::stdin().read_line(recv_buf).unwrap();
+        let Some(name) = recv_buf.split_whitespace().next() else {
             continue;
         };
+        let name = name.to_string();
         writeln!(stream.get_mut(), "REGISTRO {}", name).expect("Ended connection with server");
 
         recv_buf.clear();
@@ -31,7 +36,7 @@ fn auth_user(stream: &mut BufReader<TcpStream>, recv_buf: &mut String, send_buf:
         let mut split = recv_buf.split_whitespace();
         let _rsa_key = match (split.next(), split.next()) {
             (Some("CHAVE_PUBLICA"), Some(rsa_key)) => {
-                rsa_key.to_string();
+                base64::decode_block(rsa_key).unwrap_or_else(|_| Vec::new())
             }
             _ => {
                 print!("{}", recv_buf);
@@ -39,7 +44,12 @@ fn auth_user(stream: &mut BufReader<TcpStream>, recv_buf: &mut String, send_buf:
             }
         };
 
-        writeln!(stream.get_mut(), "CHAVE_SIMETRICA 123").expect("Ended connection with server");
+        writeln!(
+            stream.get_mut(),
+            "CHAVE_SIMETRICA {}",
+            base64::encode_block(&aes_key),
+        )
+        .expect("Ended connection with server");
         break;
     }
 }
@@ -54,40 +64,49 @@ fn main() {
     );
     println!("connecting to {addr}");
 
+    let cipher = symm::Cipher::aes_128_cbc();
+    let aes_key: AesKey = rand::random();
+    println!("AES key: {}", base64::encode_block(&aes_key));
+
     let mut send_buf = String::new();
     let mut recv_buf = String::new();
-    auth_user(&mut stream, &mut recv_buf, &mut send_buf);
+    auth_user(&mut stream, &mut recv_buf, aes_key);
     println!("Registered.");
-
-    writeln!(stream.get_mut(), "LISTAR_SALAS").expect("Ended connection with server");
-    recv_buf.clear();
-    stream
-        .read_line(&mut recv_buf)
-        .expect("Ended connection with server");
-    /* decode */
-    print!("{}", recv_buf);
 
     {
         // thread de leitura do socket
         let mut stream = BufReader::new(stream.get_ref().try_clone().unwrap());
-        let mut buf = String::new();
         std::thread::spawn(move || loop {
-            buf.clear();
+            recv_buf.clear();
             stream
-                .read_line(&mut buf)
+                .read_line(&mut recv_buf)
                 .expect("Ended connection with server");
-            /* decode */
-            print!("{}", buf);
+            /*  let line = symm::decrypt(
+             *      cipher,
+             *      &aes_key,
+             *      None,
+             *      &base64::decode_block(buf.trim()).unwrap(),
+             *  )
+             *  .unwrap();
+             *  let line = std::str::from_utf8(&line).unwrap();
+             *  println!("{}", line);
+             */
         });
     }
 
     // thread main de leitura do stdin
+    send_buf.clear();
+    let _ = writeln!(&mut send_buf, "LISTAR_SALAS");
     loop {
-        send_buf.clear();
-        std::io::stdin().read_line(&mut send_buf).unwrap();
         /* encode */
         if send_buf.trim() != "" {
-            write!(stream.get_mut(), "{}", send_buf).expect("Ended connection with server");
+            /*  let line = base64::encode_block(
+             *      &symm::encrypt(cipher, &aes_key, None, send_buf.trim().as_bytes()).unwrap(),
+             *  );
+             */
+            writeln!(stream.get_mut(), "{}", send_buf).expect("Ended connection with server");
         }
+        send_buf.clear();
+        std::io::stdin().read_line(&mut send_buf).unwrap();
     }
 }
