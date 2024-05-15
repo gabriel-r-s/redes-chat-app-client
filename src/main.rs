@@ -23,7 +23,7 @@ fn auth_user(stream: &mut BufReader<TcpStream>, recv_buf: &mut String, send_buf:
             continue;
         }
 
-        writeln!(stream.get_mut(), "AUTENTICACAO {}", name).unwrap();
+        writeln!(stream.get_mut(), "AUTENTICACAO {}", name).expect("Ended connection with server");
         recv_buf.clear();
         stream
             .read_line(recv_buf)
@@ -49,18 +49,17 @@ fn main() {
         .nth(1)
         .and_then(|addr| SocketAddr::from_str(&addr).ok())
         .unwrap_or(SocketAddr::from(([127, 0, 0, 1], 8888)));
-    println!("connecting to {addr}");
     let mut stream = BufReader::new(
         TcpStream::connect(addr).unwrap_or_else(|_| panic!("Cannot connect to address {}", addr)),
     );
+    println!("connecting to {addr}");
 
-    let mut recv_buf = String::new();
     let mut send_buf = String::new();
-
+    let mut recv_buf = String::new();
     auth_user(&mut stream, &mut recv_buf, &mut send_buf);
     println!("Registered.");
-    writeln!(stream.get_mut(), "LISTAR_SALAS").expect("Ended connection with server");
 
+    writeln!(stream.get_mut(), "LISTAR_SALAS").expect("Ended connection with server");
     recv_buf.clear();
     stream
         .read_line(&mut recv_buf)
@@ -68,6 +67,21 @@ fn main() {
     /* decode */
     print!("{}", recv_buf);
 
+    {
+        // thread de leitura do socket
+        let mut stream = BufReader::new(stream.get_ref().try_clone().unwrap());
+        let mut buf = String::new();
+        std::thread::spawn(move || loop {
+            buf.clear();
+            stream
+                .read_line(&mut buf)
+                .expect("Ended connection with server");
+            /* decode */
+            print!("{}", buf);
+        });
+    }
+
+    // thread main de leitura do stdin
     loop {
         send_buf.clear();
         std::io::stdin().read_line(&mut send_buf).unwrap();
@@ -75,12 +89,5 @@ fn main() {
         if send_buf.trim() != "" {
             write!(stream.get_mut(), "{}", send_buf).expect("Ended connection with server");
         }
-
-        recv_buf.clear();
-        stream
-            .read_line(&mut recv_buf)
-            .expect("Ended connection with server");
-        /* decode */
-        print!("{}", recv_buf);
     }
 }
