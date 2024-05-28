@@ -25,9 +25,11 @@ fn auth_user(
         writeln!(stream.get_mut(), "REGISTRO {}", name).expect("Ended connection with server");
 
         recv_buf.clear();
-        stream
-            .read_line(recv_buf)
-            .expect("Ended connection with server");
+        while recv_buf.trim() == "" {
+            stream
+                .read_line(recv_buf)
+                .expect("Ended connection with server");
+        }
         if recv_buf.trim() != "REGISTRO_OK" {
             print!("{}", recv_buf);
             continue;
@@ -35,9 +37,11 @@ fn auth_user(
 
         writeln!(stream.get_mut(), "AUTENTICACAO {}", name).expect("Ended connection with server");
         recv_buf.clear();
-        stream
-            .read_line(recv_buf)
-            .expect("Ended connection with server");
+        while recv_buf.trim() == "" {
+            stream
+                .read_line(recv_buf)
+                .expect("Ended connection with server");
+        }
         let mut split = recv_buf.split_whitespace();
         let rsa_key = match (split.next(), split.next()) {
             (Some("CHAVE_PUBLICA"), Some(rsa_key)) => {
